@@ -1,0 +1,25 @@
+{
+    "name": "real-estate-map",
+    "version": "1.0.0",
+    "description": "GIS visualization for real estate insights",
+    "scripts": {
+        "start": "parcel index.html",
+        "build": "parcel build index.html --public-url ./"
+    },
+    "keywords": [
+        "real estate",
+        "gis",
+        "leaflet",
+        "typescript"
+    ],
+    "author": "Your Name",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/leaflet": "^1.x.x",
+        "parcel": "^2.x.x",
+        "typescript": "^5.x.x"
+    },
+    "dependencies": {
+        "leaflet": "^1.9.4"
+    }
+}

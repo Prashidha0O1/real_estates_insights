@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,16 +17,16 @@ import (
 
 // Property represents a single real estate listing.
 type Property struct {
-	ID          string  `json:"id"`
-	Title       string  `json:"title"`
-	Price       float66 `json:"price"`
-	Currency    string  `json:"currency"`
-	Location    string  `json:"location"`
-	Description string  `json:"description"`
-	Bedrooms    int     `json:"bedrooms"`
-	Bathrooms   int     `json:"bathrooms"`
-	AreaSqFt    float64 `json:"areaSqFt"`
-	URL         string  `json:"url"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Price       float64   `json:"price"`
+	Currency    string    `json:"currency"`
+	Location    string    `json:"location"`
+	Description string    `json:"description"`
+	Bedrooms    int       `json:"bedrooms"`
+	Bathrooms   int       `json:"bathrooms"`
+	AreaSqFt    float64   `json:"areaSqFt"`
+	URL         string    `json:"url"`
 	ScrapedAt   time.Time `json:"scrapedAt"`
 }
 
@@ -37,8 +39,8 @@ type ScraperConfig struct {
 
 func main() {
 	config := ScraperConfig{
-		BaseURL:    "", 
-		SearchPath: "/search?q=property&page=",
+		BaseURL:    "https://www.realestateinnepal.com/", 
+		SearchPath: "/search-result/?location=kathmandu",
 		PagesToScrape: 2, 
 	}
 
@@ -111,26 +113,49 @@ func scrapePage(url string) ([]Property, error) {
 	}
 
 	var properties []Property
-	doc.Find(".row").Each(func(i int, s *goquery.Selection) {
-		id, _ := s.Attr("data-id")
+	
+	// Based on the actual website structure from realestateinnepal.com
+	doc.Find("article, .property-item, .listing-item").Each(func(i int, s *goquery.Selection) {
+		// Extract property ID from code or generate one
+		codeElement := s.Find("code, .property-code").First()
+		id := strings.TrimSpace(codeElement.Text())
 		if id == "" {
-			id = fmt.Sprintf("property-%d-%d", time.Now().UnixNano(), i) // Fallback ID
+			id = fmt.Sprintf("property-%d-%d", time.Now().UnixNano(), i)
 		}
 
-		title := strings.TrimSpace(s.Find(".listing-title a").Text())
-		priceStr := strings.TrimSpace(s.Find(".listing-price").Text())
-		location := strings.TrimSpace(s.Find(".listing-location").Text())
-		description := strings.TrimSpace(s.Find(".listing-description").Text())
-		propertyURL, _ := s.Find(".listing-title a").Attr("href")
-		if !strings.HasPrefix(propertyURL, "http") {
-			propertyURL = "https://www.example-real-estate.com" + propertyURL // Make absolute
+		// Extract title
+		titleElement := s.Find("h3, h4, .property-title").First()
+		title := strings.TrimSpace(titleElement.Text())
+
+		// Extract price
+		priceElement := s.Find(".price, [class*='price'], strong").First()
+		priceStr := strings.TrimSpace(priceElement.Text())
+
+		// Extract location
+		locationElement := s.Find(".location, [class*='location'], p").First()
+		location := strings.TrimSpace(locationElement.Text())
+
+		// Extract description (might be in title or location if no separate description)
+		description := title
+		if location != "" && location != title {
+			description = fmt.Sprintf("%s - %s", title, location)
 		}
 
+		// Extract URL
+		linkElement := s.Find("a").First()
+		propertyURL, _ := linkElement.Attr("href")
+		if propertyURL != "" && !strings.HasPrefix(propertyURL, "http") {
+			propertyURL = "https://www.realestateinnepal.com" + propertyURL
+		}
+
+		// Parse price and currency
 		price, currency := parsePrice(priceStr)
-		bedrooms, _ := strconv.Atoi(strings.TrimSpace(s.Find(".listing-beds").Text()))
-		bathrooms, _ := strconv.Atoi(strings.TrimSpace(s.Find(".listing-baths").Text()))
-		areaStr := strings.TrimSpace(s.Find(".listing-area").Text())
-		area, _ := strconv.ParseFloat(strings.TrimSuffix(areaStr, " sqft"), 64)
+
+		// Extract bedrooms and bathrooms from the property details
+		detailsText := s.Text()
+		bedrooms := extractBedrooms(detailsText)
+		bathrooms := extractBathrooms(detailsText)
+		area := extractArea(detailsText)
 
 		prop := Property{
 			ID:          id,
@@ -149,6 +174,40 @@ func scrapePage(url string) ([]Property, error) {
 	})
 
 	return properties, nil
+}
+
+// Helper functions to extract property details from text
+func extractBedrooms(text string) int {
+	re := regexp.MustCompile(`(\d+)\s*Bed`)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		if beds, err := strconv.Atoi(matches[1]); err == nil {
+			return beds
+		}
+	}
+	return 0
+}
+
+func extractBathrooms(text string) int {
+	re := regexp.MustCompile(`(\d+)\s*Bath`)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		if baths, err := strconv.Atoi(matches[1]); err == nil {
+			return baths
+		}
+	}
+	return 0
+}
+
+func extractArea(text string) float64 {
+	re := regexp.MustCompile(`(\d+(?:\.\d+)?)\s*sqft`)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		if area, err := strconv.ParseFloat(matches[1], 64); err == nil {
+			return area
+		}
+	}
+	return 0.0
 }
 
 // parsePrice attempts to extract price and currency from a string.
