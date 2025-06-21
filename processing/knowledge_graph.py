@@ -16,20 +16,20 @@ def build_knowledge_graph(properties):
         if not prop_id:
             continue
 
-        # Add Property Node
+        # Add Property Node - ensure all attributes are strings for GML compatibility
         G.add_node(prop_id,
                    type="Property",
-                   title=prop_data.get('title'),
-                   price=prop_data.get('price'),
-                   url=prop_data.get('url'),
-                   bedrooms=prop_data.get('bedrooms'),
-                   bathrooms=prop_data.get('bathrooms'),
-                   areaSqFt=prop_data.get('areaSqFt'),
-                   latitude=prop_data.get('latitude'),
-                   longitude=prop_data.get('longitude'))
+                   title=str(prop_data.get('title', '')),
+                   price=str(prop_data.get('price', '')),
+                   url=str(prop_data.get('url', '')),
+                   bedrooms=str(prop_data.get('bedrooms', '')),
+                   bathrooms=str(prop_data.get('bathrooms', '')),
+                   areaSqFt=str(prop_data.get('areaSqFt', '')),
+                   latitude=str(prop_data.get('latitude', '')),
+                   longitude=str(prop_data.get('longitude', '')))
 
         # Add Location Node and "LOCATED_IN" relationship
-        location_name = prop_data.get('full_address') or prop_data.get('location_raw')
+        location_name = prop_data.get('full_address') or prop_data.get('location_raw') or prop_data.get('location', '')
         if location_name:
             # Use a simpler, normalized location name for the node if full address is too long/varied
             simple_location_name = " ".join(location_name.lower().split(',')[:1]).strip() # e.g., "Kathmandu"
@@ -40,9 +40,10 @@ def build_knowledge_graph(properties):
         # Add Amenities Nodes and "HAS_AMENITY" relationship
         amenities = prop_data.get('extracted_amenities', [])
         for amenity in amenities:
-            amenity_node_id = f"Amenity:{amenity}" # Unique ID for amenity node
-            G.add_node(amenity_node_id, type="Amenity", name=amenity)
-            G.add_edge(prop_id, amenity_node_id, relation="HAS_AMENITY")
+            if amenity:  # Only add non-empty amenities
+                amenity_node_id = f"Amenity:{amenity}" # Unique ID for amenity node
+                G.add_node(amenity_node_id, type="Amenity", name=str(amenity))
+                G.add_edge(prop_id, amenity_node_id, relation="HAS_AMENITY")
 
         # Example: Infer Property Type from title/description
         property_type = "House" # Default
@@ -51,21 +52,50 @@ def build_knowledge_graph(properties):
             property_type = "Apartment"
         elif "condo" in title:
             property_type = "Condominium"
+        elif "villa" in title:
+            property_type = "Villa"
+        elif "land" in title:
+            property_type = "Land"
         
         type_node_id = f"Type:{property_type}"
         G.add_node(type_node_id, type="PropertyType", name=property_type)
         G.add_edge(prop_id, type_node_id, relation="IS_TYPE_OF")
 
-        # You can add more entities and relationships:
-        # - Agent/Seller: if extracted
-        # - Features: specific features like "balcony", "fireplace"
-        # - Nearby POIs: if geocoded and linked to known POIs
+        # Add source information
+        source = prop_data.get('source', '')
+        if source:
+            source_node_id = f"Source:{source}"
+            G.add_node(source_node_id, type="Source", name=str(source))
+            G.add_edge(prop_id, source_node_id, relation="FROM_SOURCE")
 
     return G
 
 def save_graph_gml(graph, filepath):
     """Saves the graph to a GML file."""
-    nx.write_gml(graph, filepath)
+    # Clean the graph to ensure all attributes are strings
+    clean_graph = nx.DiGraph()
+    
+    # Copy nodes with string attributes
+    for node, attrs in graph.nodes(data=True):
+        clean_attrs = {}
+        for key, value in attrs.items():
+            if value is None:
+                clean_attrs[key] = ""
+            else:
+                clean_attrs[key] = str(value)
+        clean_graph.add_node(node, **clean_attrs)
+    
+    # Copy edges
+    for u, v, attrs in graph.edges(data=True):
+        clean_attrs = {}
+        for key, value in attrs.items():
+            if value is None:
+                clean_attrs[key] = ""
+            else:
+                clean_attrs[key] = str(value)
+        clean_graph.add_edge(u, v, **clean_attrs)
+    
+    nx.write_gml(clean_graph, filepath)
     print(f"Knowledge graph saved to {filepath} in GML format.")
 
 def visualize_graph(graph):
